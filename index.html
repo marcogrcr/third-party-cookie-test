@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Third-party cookie test</title>
+    <meta charset="utf-8" />
+    <style>
+      table {
+        border-collapse: collapse;
+      }
+
+      table,
+      th,
+      td {
+        border: 1px solid black;
+        text-align: center;
+      }
+
+      tr > td:first-child {
+        text-align: left;
+      }
+
+      td {
+        cursor: default;
+      }
+
+      .show-cookie-value .cookie-value {
+        display: unset;
+      }
+
+      .cookie-value {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Third-party cookie test</h1>
+
+    <ul id="sites"></ul>
+
+    <fieldset>
+      <legend>Options</legend>
+
+      <input id="show-set-by" type="checkbox" />
+      <label for="show-set-by">Show set by</label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Apply to</legend>
+      <div>
+        <input id="same-origin" name="apply-to" type="radio" checked />
+        <label for="same-origin">same-origin</label>
+        <input id="same-scheme" name="apply-to" type="radio" />
+        <label for="same-scheme">same-scheme</label>
+        <input id="same-host" name="apply-to" type="radio" />
+        <label for="same-host">same-host</label>
+        <input id="same-site" name="apply-to" type="radio" />
+        <label for="same-site">same-site</label>
+        <input id="all" name="apply-to" type="radio" />
+        <label for="all">all</label>
+      </div>
+      <div>
+        <input id="cross-origin" name="apply-to" type="radio" />
+        <label for="cross-origin">cross-origin</label>
+        <input id="cross-scheme" name="apply-to" type="radio" />
+        <label for="cross-scheme">cross-scheme</label>
+        <input id="cross-host" name="apply-to" type="radio" />
+        <label for="cross-host">cross-host</label>
+        <input id="cross-site" name="apply-to" type="radio" />
+        <label for="cross-site">cross-site</label>
+      </div>
+    </fieldset>
+
+    <fieldset id="actions">
+      <legend>Action</legend>
+      <button>get</button>
+      <button>set</button>
+      <button>clear</button>
+    </fieldset>
+    <hr />
+
+    <div id="result">{result}</div>
+
+    <script>
+      // functions
+      async function clearCookies(origin) {
+        try {
+          const res = await fetch(`${origin}/clear-cookies`, {
+            method: "POST",
+            credentials: "include",
+          });
+          if (!res.ok) {
+            throw new Error(`Got ${res.status} response: ${await res.text()}`);
+          }
+          result.append(
+            `Cleared cookies in ${origin}`,
+            document.createElement("hr")
+          );
+        } catch (e) {
+          const pre = document.createElement("pre");
+          pre.innerText = e.toString();
+          result.append(
+            `Failed to clear cookies in ${origin}`,
+            pre,
+            document.createElement("hr")
+          );
+        }
+      }
+
+      function getApplyTo(origins) {
+        let filters = {
+          "same-origin": (o) => location.origin === o,
+          "same-host": (o) => location.hostname === new URL(o).hostname,
+          "same-site": (o) =>
+            location.hostname.split(".").slice(-2).join(".") ===
+            new URL(o).hostname.split(".").slice(-2).join("."),
+          "same-scheme": (o) => location.protocol === new URL(o).protocol,
+          all: () => true,
+        };
+        filters = {
+          ...filters,
+          "cross-origin": (o) => !filters["same-origin"](o),
+          "cross-host": (o) => !filters["same-host"](o),
+          "cross-site": (o) => !filters["same-site"](o),
+          "cross-scheme": (o) => !filters["same-scheme"](o),
+        };
+
+        const applyTo = document.querySelector(
+          'input[name="apply-to"]:checked'
+        ).id;
+
+        return origins.filter(filters[applyTo]);
+      }
+
+      async function getCookies(origin) {
+        try {
+          const res = await fetch(`${origin}/get-cookies`, {
+            credentials: "include",
+          });
+          if (!res.ok) {
+            throw new Error(`Got ${res.status} response: ${await res.text()}`);
+          }
+          return await res.json();
+        } catch (e) {
+          return e;
+        }
+      }
+
+      function getCookieName(sameSite, secure) {
+        return `${secure ? "secure" : "insecure"}-samesite-${
+          sameSite ? sameSite.toLowerCase() : "default"
+        }-cookie`;
+      }
+
+      function getCookieValueHtml(cookies, sameSite, secure) {
+        if (cookies instanceof Error) {
+          return `
+            <span style="color: red">
+              <i>(${cookies.toString()})</i>
+            </span>`;
+        }
+
+        const cookieValue = cookies[getCookieName(sameSite, secure)];
+        if (!cookieValue) {
+          return `
+            <span style="color: orange">
+              <strong>NO</strong>
+            </span>`;
+        }
+
+        return `
+          <span style="color: green">
+            <strong>YES</strong>
+            <span class="cookie-value">
+              <br />
+              <i>${cookieValue}<i>
+            </span>
+          </span>`;
+      }
+
+      async function renderCookieTable(origins) {
+        const originCookieValues = await Promise.all(
+          origins.map(async (o) => [o, await getCookies(o)])
+        );
+
+        const table = document.createElement("template");
+        table.innerHTML = `
+          <table>
+            <thead>
+              <tr>
+                <th><code>Origin</code></th>
+                <th><code>SameSite=(default)</code></th>
+                <th><code>SameSite=Lax</code></th>
+                <th><code>SameSite=None</code></th>
+                <th><code>SameSite=Strict</code></th>
+                <th><code>Secure; SameSite=(default)</code></th>
+                <th><code>Secure; SameSite=Lax</code></th>
+                <th><code>Secure; SameSite=None</code></th>
+                <th><code>Secure; SameSite=Strict</code></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${originCookieValues
+                .map(
+                  ([origin, c]) => `
+              <tr>
+                <td><a href="${origin}">${origin}</a></td>
+                <td>${getCookieValueHtml(c, null, false)}</td>
+                <td>${getCookieValueHtml(c, "Lax", false)}</td>
+                <td>${getCookieValueHtml(c, "None", false)}</td>
+                <td>${getCookieValueHtml(c, "Strict", false)}</td>
+                <td>${getCookieValueHtml(c, null, true)}</td>
+                <td>${getCookieValueHtml(c, "Lax", true)}</td>
+                <td>${getCookieValueHtml(c, "None", true)}</td>
+                <td>${getCookieValueHtml(c, "Strict", true)}</td>
+              </tr>
+              `
+                )
+                .join("")}
+            </tbody>
+          </table>
+        `;
+
+        toggleShowCookieValue(table.content.querySelector("table"));
+        result.append(table.content);
+      }
+
+      async function setCookies(origin) {
+        try {
+          const body = {
+            cookiesToSet: [
+              {},
+              { sameSite: "Lax" },
+              { sameSite: "None" },
+              { sameSite: "Strict" },
+              { secure: true },
+              { sameSite: "Lax", secure: true },
+              { sameSite: "None", secure: true },
+              { sameSite: "Strict", secure: true },
+            ].map(({ sameSite, secure }) => ({
+              name: getCookieName(sameSite, secure),
+              value: location.origin,
+              sameSite,
+              secure,
+            })),
+          };
+          const res = await fetch(`${origin}/set-cookies`, {
+            credentials: "include",
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          if (!res.ok) {
+            throw new Error(`Got ${res.status} response: ${await res.text()}`);
+          }
+          result.append(
+            `Set cookies in ${origin}`,
+            document.createElement("hr")
+          );
+        } catch (e) {
+          const pre = document.createElement("pre");
+          pre.innerText = e.toString();
+          result.append(
+            `Failed to set cookies in ${origin}`,
+            pre,
+            document.createElement("hr")
+          );
+        }
+      }
+
+      function toggleShowCookieValue(table) {
+        if (table) {
+          table.classList.toggle(
+            "show-cookie-value",
+            document.querySelector("#show-set-by").checked
+          );
+        }
+      }
+    </script>
+
+    <script>
+      // main
+      const ALL_ORIGINS = [
+        "http://auth.cookies.example:8080",
+        "http://foo.cookies.example:8080",
+        "http://sub.foo.cookies.example:8080",
+        "http://bar.example:8080",
+        "https://auth.cookies.example:8443",
+        "https://foo.cookies.example:8443",
+        "https://sub.foo.cookies.example:8443",
+        "https://bar.example:8443",
+      ];
+
+      const result = document.querySelector("#result");
+
+      // render origin links
+      const sites = document.querySelector("#sites");
+      ALL_ORIGINS.forEach((origin) => {
+        const li = document.createElement("li");
+        const a = document.createElement("a");
+        a.href = origin;
+        a.textContent = origin;
+        if (origin === location.origin) {
+          a.style.fontWeight = "bold";
+        }
+        li.append(a);
+        sites.append(li);
+      });
+
+      // action button click listeners
+      document
+        .querySelector("#actions")
+        .addEventListener("click", async (e) => {
+          document.querySelector("#result").innerHTML = "";
+          const selectedOrigins = getApplyTo(ALL_ORIGINS);
+
+          if (e.target.textContent === "get") {
+            await renderCookieTable(selectedOrigins);
+          } else {
+            for (const origin of selectedOrigins) {
+              switch (e.target.textContent) {
+                case "clear":
+                  await clearCookies(origin);
+                  break;
+                case "set":
+                  await setCookies(origin);
+                  break;
+              }
+            }
+          }
+        });
+
+      // show set by listener
+      document
+        .querySelector("#show-set-by")
+        .addEventListener("change", (e) =>
+          toggleShowCookieValue(document.querySelector("table"))
+        );
+    </script>
+  </body>
+</html>

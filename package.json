@@ -1,0 +1,8 @@
+{
+  "name": "third-party-cookie-test",
+  "private": true,
+  "scripts": {
+    "generate-cert": "([ -f ./cert.pem ] && [ -f ./key.pem ]) || ./create-cert.sh",
+    "start": "npm run generate-cert && node ./server.js"
+  }
+}
